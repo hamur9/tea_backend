@@ -71,7 +71,8 @@ def init_table():
             clan TEXT DEFAULT NULL,
             rewards INT DEFAULT 0,
             achievements TEXT DEFAULT NULL,
-            wheels TEXT DEFAULT NULL
+            wheel DATETIME DEFAULT NULL
+            avatar INT DEFAULT 0
         )
     """)
     conn.commit()
@@ -112,7 +113,7 @@ def start_db():
 def get_account(username):
     conn = get_connection()
     cursor = conn.cursor(dictionary=True)
-    cursor.execute("SELECT username, leaves, `rank`, xp, lvl, daily_reward_timer, clan, rewards, achievements, wheels FROM accounts WHERE username = %s", (username,))
+    cursor.execute("SELECT username, leaves, `rank`, xp, lvl, daily_reward_timer, clan, rewards, achievements, wheel, avatar FROM accounts WHERE username = %s", (username,))
     account = cursor.fetchone()
     cursor.close()
     conn.close()
@@ -134,15 +135,30 @@ def create_account(username, leaves=0, rank=0, xp=50, lvl=1):
     return True
 
 # Обновление валюты аккаунта
-def update_account_leaves(username, leaves):
+def update_account_leaves(username, leaves_increment):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("UPDATE accounts SET leaves = %s WHERE username = %s", (leaves, username))
+    # Add the reward (increment) to the existing leaves value
+    cursor.execute("UPDATE accounts SET leaves = leaves + %s WHERE username = %s", (leaves_increment, username))
     conn.commit()
     cursor.close()
     conn.close()
 
-def set_daily_reward_timer(username):
+def recalc_user_rank(username):
+    conn = get_connection()
+    cursor = conn.cursor()
+    query = "SELECT COUNT(*) FROM accounts WHERE leaves > (SELECT leaves FROM accounts WHERE username = %s)"
+    cursor.execute(query, (username,))
+    result = cursor.fetchone()
+    rank = result[0] + 1
+    cursor.execute("UPDATE accounts SET `rank` = %s WHERE username = %s", (rank, username))
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return rank
+
+
+def set_daily_reward_timer_operation(username):
 
     conn = get_connection()
     cursor = conn.cursor(dictionary=True)
@@ -178,17 +194,65 @@ def set_daily_reward_timer(username):
     except Exception as e:
         return e
 
-def rank_xp_lvl_update(username, rank, xp, lvl):
+
+def set_wheel_timer_operation(username):
+
     conn = get_connection()
     cursor = conn.cursor(dictionary=True)
+
+    # Получаем время последнего обновления из базы данных
+    try:
+        query = "SELECT wheel FROM accounts WHERE username = %s"
+        cursor.execute(query, (username,))
+        result = cursor.fetchone()
+
+        if not result:
+            return 1
+
+        timer_end = result['wheel']
+        current_time = datetime.now()
+
+        # Если timer_end равен NULL или прошло 24 часа
+        if timer_end is None or (current_time - timer_end) >= timedelta(minutes=30):
+            # Обновляем время в базе данных
+            new_timer_end = current_time
+            update_query = "UPDATE accounts SET wheel = %s WHERE username = %s"
+            cursor.execute(update_query, (new_timer_end, username))
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return 0
+        else:
+            # Если 24 часа еще не прошло
+            cursor.close()
+            conn.close()
+            return 2
+
+    except Exception as e:
+        return e
+
+def set_avatar_event(username, avatar_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    # Add the reward (increment) to the existing leaves value
+    cursor.execute("UPDATE accounts SET avatar = %s WHERE username = %s", (avatar_id, username))
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+def xp_update(username, xp):
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+    query = "SELECT xp FROM accounts WHERE username = %s"
+    cursor.execute(query, username)
+    result = cursor.fetchone()
     query = """
     UPDATE accounts
-    SET `rank` = %s,
-        xp = %s,
+    SET xp = xp + %s,
         lvl = %s
     WHERE username = %s
     """
-    values = (rank, xp, lvl, username)
+    values = (xp, int(result+xp) // 1000, username)
     cursor.execute(query, values)
     conn.commit()
     cursor.close()
@@ -209,4 +273,3 @@ def players_leaderboard():
     conn.close()
     return data
 
-#def get_wheels_info(username):
