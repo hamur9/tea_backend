@@ -1,9 +1,9 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS  # Enable CORS
 from database.operations import (
-    get_account, create_account, set_daily_reward_timer,
-    rank_xp_lvl_update, update_account_leaves, recalc_user_rank,
-    players_leaderboard
+    get_account, create_account, set_daily_reward_timer_operation,
+    xp_update, update_account_leaves, recalc_user_rank,
+    players_leaderboard, set_wheel_timer_operation, set_avatar_event
 )
 from database.operations import start_db, start_mysql_server, stop_mysql_server
 
@@ -44,12 +44,12 @@ def update_leaves(username):
     new_rank = recalc_user_rank(username)
     return jsonify({'message': 'Кол-во валюты успешно сохранено', 'rank': new_rank}), 200
 
-@app.route('/account/<username>/set_wheel_timer', methods=['POST'])
-def set_timer(username):
+@app.route('/account/<username>/set_daily_reward_timer', methods=['POST'])
+def set_daily_reward_timer(username):
     if not username:
         return jsonify({'error': 'username is required'}), 400
 
-    db_answer = set_daily_reward_timer(username)
+    db_answer = set_daily_reward_timer_operation(username)
     if db_answer == 1:
         return jsonify({'error': 'Account not found'}), 404
     elif db_answer == 0:
@@ -59,20 +59,48 @@ def set_timer(username):
     else:
         return jsonify({'error': str(db_answer)}), 404
 
+@app.route('/account/<username>/set_wheel_timer', methods=['POST'])
+def set_wheel_timer(username):
+    if not username:
+        return jsonify({'error': 'username is required'}), 400
+
+    db_answer = set_wheel_timer_operation(username)
+    if db_answer == 1:
+        return jsonify({'error': 'Account not found'}), 404
+    elif db_answer == 0:
+        return jsonify({'message': 'Timer updated successfully'}), 200
+    elif db_answer == 2:
+        return jsonify({'error': '30 minutes have not passed yet'}), 403
+    else:
+        return jsonify({'error': str(db_answer)}), 404
+
+
+@app.route('/account/<username>/avatar_update', methods=['PUT'])
+def avatar_update(username):
+    if not username:
+        return jsonify({'error': 'username is required'}), 400
+    data = request.get_json()
+    # Here, "leaves" is treated as the increment (the reward amount to add)
+    avatar = data.get('avatar')
+    if avatar is None:
+        return jsonify({'error': 'Не был передан id аватара'}), 400
+
+    set_avatar_event(username, avatar)
+    return jsonify({'message': 'Аватар успешно установлен'}), 200
+
 @app.route('/account/<username>/update_xp_system', methods=['PUT'])
 def update_xp_system(username):
     data = request.get_json()
     xp = data.get('xp')
-    lvl = data.get('lvl')
 
     if not username:
         return jsonify({'error': 'Нет имени'}), 400
 
-    if xp is None or lvl is None:
+    if xp is None:
         return jsonify({'error': 'Нет хп или левела'}), 400
 
     # Update XP and level (ignoring any rank value sent from the client)
-    rank_xp_lvl_update(username, None, xp, lvl)
+    xp_update(username, xp)
     new_rank = recalc_user_rank(username)
     return jsonify({'message': 'Данные успешно сохранены', 'rank': new_rank}), 200
 
