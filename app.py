@@ -100,8 +100,7 @@ def update_xp_system(username):
 
     # Update XP and level (ignoring any rank value sent from the client)
     xp_update(username, xp)
-    new_rank = recalc_user_rank(username)
-    return jsonify({'message': 'Данные успешно сохранены', 'rank': new_rank}), 200
+    return jsonify({'message': 'Данные успешно сохранены'}), 200
 
 @app.route('/account/leaderboard/players', methods=['GET'])
 def get_leaderboard_players():
