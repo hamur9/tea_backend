@@ -6,10 +6,7 @@ import subprocess
 
 def start_mysql_server():
     try:
-        # Запуск MySQL-сервера через Homebrew
         result = subprocess.run(["brew", "services", "start", "mysql"], capture_output=True, text=True)
-
-        # Проверка результата
         if result.returncode == 0:
             print("MySQL-сервер успешно запущен.")
             print(result.stdout)
@@ -19,23 +16,18 @@ def start_mysql_server():
     except Exception as e:
         print(f"Ошибка: {e}")
 
-
 def stop_mysql_server():
     try:
-        # Остановка MySQL-сервера через Homebrew (macOS)
         result = subprocess.run(["brew", "services", "stop", "mysql"], capture_output=True, text=True)
-
-        # Проверка результата
         if result.returncode == 0:
             print("MySQL-сервер успешно остановлен.")
             print(result.stdout)
         else:
-            print("Ошибка при остановке MySQL-сервера:")
+            print("Ошибка при остановке MySQL-сервер:")
             print(result.stderr)
     except Exception as e:
         print(f"Ошибка: {e}")
 
-# Функция для подключения к базе данных
 def get_connection():
     return mysql.connector.connect(
         host=Config.MYSQL_HOST,
@@ -44,11 +36,7 @@ def get_connection():
         database=Config.MYSQL_DB
     )
 
-# Инициализация базы данных (создание таблицы, если её нет)
 def create_database(connection):
-    """
-    Создает базу данных, если она не существует.
-    """
     try:
         cursor = connection.cursor()
         cursor.execute(f"CREATE DATABASE IF NOT EXISTS {Config.MYSQL_DB}")
@@ -71,7 +59,8 @@ def init_table():
             clan TEXT DEFAULT NULL,
             rewards INT DEFAULT 0,
             achievements TEXT DEFAULT NULL,
-            wheels TEXT DEFAULT NULL
+            wheel DATETIME DEFAULT NULL,
+            avatar INT DEFAULT 0
         )
     """)
     conn.commit()
@@ -79,50 +68,35 @@ def init_table():
     conn.close()
 
 def start_db():
-
     try:
-
-        # Подключение к MySQL-серверу (без указания базы данных)
         connection = mysql.connector.connect(
             host=Config.MYSQL_HOST,
             user=Config.MYSQL_USER,
             password=Config.MYSQL_PASSWORD
         )
         print("Подключение к MySQL-серверу успешно установлено.")
-
-        # Создаем базу данных, если она не существует
         create_database(connection)
-
-        # Закрываем соединение с сервером
         connection.close()
-
-        # Подключаемся к созданной базе данных
         connection = get_connection()
         print("Подключение к базе данных успешно установлено.")
-
-        # Создаем таблицу, если она не существует
         init_table()
         connection.close()
-
     except Error as err:
         print(f"Ошибка: {err}")
 
-
-# Получение аккаунта по username
 def get_account(username):
     conn = get_connection()
     cursor = conn.cursor(dictionary=True)
-    cursor.execute("SELECT username, leaves, `rank`, xp, lvl, daily_reward_timer, clan, rewards, achievements, wheels FROM accounts WHERE username = %s", (username,))
+    cursor.execute("SELECT username, leaves, `rank`, xp, lvl, daily_reward_timer, clan, rewards, achievements, wheel, avatar FROM accounts WHERE username = %s", (username,))
     account = cursor.fetchone()
     cursor.close()
     conn.close()
     return account
 
-# Создание нового аккаунта
 def create_account(username, leaves=0, rank=0, xp=50, lvl=1):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT username FROM accounts WHERE username = %s", (username, ))
+    cursor.execute("SELECT username FROM accounts WHERE username = %s", (username,))
     if cursor.fetchall():
         conn.commit()
         cursor.close()
@@ -131,13 +105,11 @@ def create_account(username, leaves=0, rank=0, xp=50, lvl=1):
         cursor.execute("INSERT INTO accounts (username, leaves, `rank`, xp, lvl) VALUES (%s, %s, %s, %s, %s)", (username, leaves, rank, xp, lvl))
         conn.commit()
         cursor.close()
-    return True
+        return True
 
-# Обновление валюты аккаунта
 def update_account_leaves(username, leaves_increment):
     conn = get_connection()
     cursor = conn.cursor()
-    # Add the reward (increment) to the existing leaves value
     cursor.execute("UPDATE accounts SET leaves = leaves + %s WHERE username = %s", (leaves_increment, username))
     conn.commit()
     cursor.close()
@@ -156,27 +128,18 @@ def recalc_user_rank(username):
     conn.close()
     return rank
 
-
-def set_daily_reward_timer(username):
-
+def set_daily_reward_timer_operation(username):
     conn = get_connection()
     cursor = conn.cursor(dictionary=True)
-
-    # Получаем время последнего обновления из базы данных
     try:
         query = "SELECT daily_reward_timer FROM accounts WHERE username = %s"
         cursor.execute(query, (username,))
         result = cursor.fetchone()
-
         if not result:
             return 1
-
         timer_end = result['daily_reward_timer']
-        current_time = datetime.now()
-
-        # Если timer_end равен NULL или прошло 24 часа
+        current_time = datetime.utcnow()  # Use UTC
         if timer_end is None or (current_time - timer_end) >= timedelta(hours=24):
-            # Обновляем время в базе данных
             new_timer_end = current_time
             update_query = "UPDATE accounts SET daily_reward_timer = %s WHERE username = %s"
             cursor.execute(update_query, (new_timer_end, username))
@@ -185,29 +148,64 @@ def set_daily_reward_timer(username):
             conn.close()
             return 0
         else:
-            # Если 24 часа еще не прошло
             cursor.close()
             conn.close()
             return 2
-
     except Exception as e:
         return e
 
-def rank_xp_lvl_update(username, rank, xp, lvl):
+def set_wheel_timer_operation(username):
     conn = get_connection()
     cursor = conn.cursor(dictionary=True)
-    query = """
-    UPDATE accounts
-    SET xp = %s,
-        lvl = %s
-    WHERE username = %s
-    """
-    values = (xp, lvl, username)
-    cursor.execute(query, values)
+    try:
+        query = "SELECT wheel FROM accounts WHERE username = %s"
+        cursor.execute(query, (username,))
+        result = cursor.fetchone()
+        if not result:
+            return 1
+        last_spin_time = result['wheel']
+        current_time = datetime.utcnow()  # Use UTC
+        if last_spin_time is None or (current_time - last_spin_time) >= timedelta(minutes=30):
+            update_query = "UPDATE accounts SET wheel = %s WHERE username = %s"
+            cursor.execute(update_query, (current_time, username))
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return 0
+        else:
+            cursor.close()
+            conn.close()
+            return 2
+    except Exception as e:
+        return e
+
+def set_avatar_event(username, avatar_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE accounts SET avatar = %s WHERE username = %s", (avatar_id, username))
     conn.commit()
     cursor.close()
     conn.close()
 
+def xp_update(username, xp):
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+    query = "SELECT xp FROM accounts WHERE username = %s"
+    cursor.execute(query, (username,))
+    result = cursor.fetchone()
+    current_xp = result['xp'] if result and 'xp' in result else 0
+    new_level = (current_xp + xp) // 1000 + 1
+    update_query = """
+    UPDATE accounts
+    SET xp = xp + %s,
+        lvl = %s
+    WHERE username = %s
+    """
+    values = (xp, new_level, username)
+    cursor.execute(update_query, values)
+    conn.commit()
+    cursor.close()
+    conn.close()
 
 def players_leaderboard():
     conn = get_connection()
@@ -223,5 +221,3 @@ def players_leaderboard():
     cursor.close()
     conn.close()
     return data
-
-#def get_wheels_info(username):
